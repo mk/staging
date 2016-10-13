@@ -58,7 +58,7 @@ defmodule CodeRunner do
     pending = opts[:max_demand] || 1
 
     # Register the producer in the state
-    producers = Map.put(producers, from, {pending})
+    producers = Map.put(producers, from, pending)
     # Ask for the pending events and schedule the next time around
     producers = ask_and_schedule(producers, from)
 
@@ -73,8 +73,8 @@ defmodule CodeRunner do
 
   def handle_events([%CodeNode{name: name, code: code}], from, producers) do
     # Bump the amount of pending events for the given producer
-    producers = Map.update!(producers, from, fn {pending} ->
-      {pending + 1}
+    producers = Map.update!(producers, from, fn pending ->
+      pending + 1
     end)
 
 
@@ -97,9 +97,9 @@ defmodule CodeRunner do
 
   defp ask_and_schedule(producers, from) do
     case producers do
-      %{^from => {pending}} ->
+      %{^from => pending} ->
         GenStage.ask(from, pending)
-        Map.put(producers, from, {0})
+        Map.put(producers, from, 0)
       %{} ->
         producers
     end
