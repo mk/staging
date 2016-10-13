@@ -11,21 +11,27 @@ defmodule CodeNode do
 
   def init(counter) do
     send(self(), :inc)
-    {:producer, counter}
+    {:producer, {counter, nil}}
   end
 
-  def handle_demand(demand, counter) when demand > 0 do
+  def handle_demand(demand, {counter, value}) when demand > 0 do
     # If the counter is 3 and we ask for 2 items, we will
     # emit the items 3 and 4, and set the state to 5.
     events = Enum.to_list(counter..counter+demand-1)
-    {:noreply, events, counter + demand}
+    {:noreply, events, {counter + demand, value}}
   end
 
-  def handle_info(:inc, counter) do
+  def handle_info(:inc, {counter, value}) do
     # This callback is invoked by the Process.send_after/3 message below.
 
-    Process.send_after(self(), :inc, 500)
-    {:noreply, [], counter + 1}
+    Process.send_after(self(), :inc, 2)
+    {:noreply, [], {counter + 1, value}}
+  end
+
+  def handle_info({:result, new_result}, {counter, _}) do
+    # This callback is invoked by the Process.send_after/3 message below.
+    IO.puts "result: #{new_result}"
+    {:noreply, [], {counter, new_result}}
   end
 end
 
@@ -62,7 +68,9 @@ defmodule CodeRunner do
 
     # Consume the events by printing them.
     IO.puts(event)
-    Process.sleep 3000
+    Process.sleep 100
+    {pid, _} = from
+    send(pid, {:result, 2 * event})
 
     # A producer_consumer would return the processed events here.
     {:noreply, [], producers}
@@ -77,7 +85,7 @@ defmodule CodeRunner do
     case producers do
       %{^from => {pending}} ->
         GenStage.ask(from, pending)
-        Process.send_after(self(), {:ask, from}, 1000)
+        Process.send_after(self(), {:ask, from}, 10)
         Map.put(producers, from, {0})
       %{} ->
         producers
