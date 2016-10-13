@@ -17,7 +17,7 @@ defmodule CodeNode do
   end
 
   def handle_demand(1 = demand, %CodeNode{name: name, has_demand: false} = node) do
-    IO.puts "#{name} has no demand"
+    IO.puts "#{name} has no evaluation demand"
     {:noreply, [], node} # return no event unless we're waiting for execution
   end
   def handle_demand(1 = demand, %CodeNode{name: name, code: code, has_demand: true} = node) when demand > 0 do
@@ -28,7 +28,7 @@ defmodule CodeNode do
 
   def handle_info(:update_code, %CodeNode{name: name, code: code} = node) do
     # This callback is invoked by the Process.send_after/3 message below.
-    Process.send_after(self(), :update_code, Enum.random(1..500))
+    Process.send_after(self(), :update_code, Enum.random(2..200))
     IO.puts "#{name} changed to `#{code + 1}`"
     {:noreply, [], %{node | code: code + 1, has_demand: true}}
   end
@@ -36,8 +36,13 @@ defmodule CodeNode do
 
   def handle_info({:result, new_result, code_for_result}, %CodeNode{name: name, code: code} = node) do
     # This callback is invoked by the Process.send_after/3 message below.
-    IO.puts "#{name} got result #{new_result} evaluating `#{code_for_result}`"
-    {:noreply, [], %{node | result: new_result}}
+    if code_for_result == code do
+      IO.puts "#{name} got result #{new_result} evaluating `#{code_for_result}`"
+      {:noreply, [], %{node | result: new_result, has_demand: false}}
+    else
+      IO.puts "#{name} got stale result #{new_result} evaluating `#{code_for_result}` while interested in result for `#{code}`"
+      {:noreply, [], node}
+    end
   end
 end
 
