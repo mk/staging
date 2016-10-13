@@ -14,7 +14,7 @@ defmodule CodeNode do
     {:producer, {name, counter, nil}}
   end
 
-  def handle_demand(1, {name, counter, value}) when demand > 0 do
+  def handle_demand(demand, {name, counter, value}) when demand > 0 do
     # If the counter is 3 and we ask for 2 items, we will
     # emit the items 3 and 4, and set the state to 5.
     events = Enum.to_list(counter..counter+demand-1)
@@ -24,13 +24,15 @@ defmodule CodeNode do
   def handle_info(:inc, {name = "A", counter, value}) do
     # This callback is invoked by the Process.send_after/3 message below.
 
-    Process.send_after(self(), :inc, 4)
+    Process.send_after(self(), :inc, Enum.random(1..5))
+    IO.puts "#{name} is now #{counter + 1}"
     {:noreply, [], {name, counter + 1, value}}
   end
   def handle_info(:inc, {name, counter, value}) do
     # This callback is invoked by the Process.send_after/3 message below.
 
-    Process.send_after(self(), :inc, 2)
+    Process.send_after(self(), :inc, Enum.random(1..5))
+    IO.puts "#{name} is now #{counter + 1}"
     {:noreply, [], {name, counter + 1, value}}
   end
 
@@ -78,15 +80,16 @@ defmodule CodeRunner do
 
     # Consume the events by printing them.
     IO.puts("handle event #{event} for #{inspect pid}")
-    Process.sleep 1000
-    send(pid, {:result, 2 * event})
+    result = 2 * event
+    Process.send_after(self(), {:process_result, pid, result, from}, Enum.random(1..500))
 
     # A producer_consumer would return the processed events here.
     {:noreply, [], producers}
   end
 
-  def handle_info({:ask, from}, producers) do
+  def handle_info({:process_result, pid, result, from}, producers) do
     # This callback is invoked by the Process.send_after/3 message below.
+    send(pid, {:result, result})
     {:noreply, [], ask_and_schedule(producers, from)}
   end
 
@@ -94,7 +97,6 @@ defmodule CodeRunner do
     case producers do
       %{^from => {pending}} ->
         GenStage.ask(from, pending)
-        Process.send_after(self(), {:ask, from}, 10)
         Map.put(producers, from, {0})
       %{} ->
         producers
