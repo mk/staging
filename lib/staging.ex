@@ -9,29 +9,36 @@ alias Experimental.{GenStage}
 defmodule CodeNode do
   use GenStage
 
-  def init(counter) do
+  def init({name, counter}) do
     send(self(), :inc)
-    {:producer, {counter, nil}}
+    {:producer, {name, counter, nil}}
   end
 
-  def handle_demand(demand, {counter, value}) when demand > 0 do
+  def handle_demand(1, {name, counter, value}) when demand > 0 do
     # If the counter is 3 and we ask for 2 items, we will
     # emit the items 3 and 4, and set the state to 5.
     events = Enum.to_list(counter..counter+demand-1)
-    {:noreply, events, {counter + demand, value}}
+    {:noreply, events, {name, counter + demand, value}}
   end
 
-  def handle_info(:inc, {counter, value}) do
+  def handle_info(:inc, {name = "A", counter, value}) do
+    # This callback is invoked by the Process.send_after/3 message below.
+
+    Process.send_after(self(), :inc, 4)
+    {:noreply, [], {name, counter + 1, value}}
+  end
+  def handle_info(:inc, {name, counter, value}) do
     # This callback is invoked by the Process.send_after/3 message below.
 
     Process.send_after(self(), :inc, 2)
-    {:noreply, [], {counter + 1, value}}
+    {:noreply, [], {name, counter + 1, value}}
   end
 
-  def handle_info({:result, new_result}, {counter, _}) do
+
+  def handle_info({:result, new_result}, {name, counter, _}) do
     # This callback is invoked by the Process.send_after/3 message below.
-    IO.puts "result: #{new_result}"
-    {:noreply, [], {counter, new_result}}
+    IO.puts "result for #{name}: #{new_result} #{inspect self()}"
+    {:noreply, [], {name, counter, new_result}}
   end
 end
 
@@ -66,10 +73,12 @@ defmodule CodeRunner do
       {pending + 1}
     end)
 
+
+    {pid, ref} = from
+
     # Consume the events by printing them.
-    IO.puts(event)
-    Process.sleep 100
-    {pid, _} = from
+    IO.puts("handle event #{event} for #{inspect pid}")
+    Process.sleep 1000
     send(pid, {:result, 2 * event})
 
     # A producer_consumer would return the processed events here.
@@ -93,9 +102,11 @@ defmodule CodeRunner do
   end
 end
 
-{:ok, a} = GenStage.start_link(CodeNode, 0)      # starting from zero
-{:ok, b} = GenStage.start_link(CodeRunner, :ok) # expand by 2
+{:ok, codeA} = GenStage.start_link(CodeNode, {"A", 0})      # starting from zero
+{:ok, codeB} = GenStage.start_link(CodeNode, {"B", 0})      # starting from zero
+{:ok, runner} = GenStage.start_link(CodeRunner, :ok) # expand by 2
 
 # # Ask for 10 items every 2 seconds.
-GenStage.sync_subscribe(b, to: a, max_demand: 1, interval: 2000)
+GenStage.sync_subscribe(runner, to: codeA, max_demand: 1, interval: 2000)
+GenStage.sync_subscribe(runner, to: codeB, max_demand: 1, interval: 2000)
 Process.sleep(:infinity)
