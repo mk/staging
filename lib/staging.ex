@@ -9,30 +9,34 @@ alias Experimental.{GenStage}
 defmodule CodeNode do
   use GenStage
 
-  defstruct name: nil, code: nil, result: nil
+  defstruct name: nil, code: nil, result: nil, has_demand: false
 
   def init({name, counter}) do
     send(self(), :update_code)
     {:producer, %CodeNode{name: name, code: counter}}
   end
 
-  def handle_demand(1 = demand, %CodeNode{name: name, code: code} = node) when demand > 0 do
-    events = [code] # this will always emit just one event with the current code
+  def handle_demand(1 = demand, %CodeNode{name: name, has_demand: false} = node) do
+    IO.puts "#{name} has no demand"
+    {:noreply, [], node} # return no event unless we're waiting for execution
+  end
+  def handle_demand(1 = demand, %CodeNode{name: name, code: code, has_demand: true} = node) when demand > 0 do
+    IO.puts "#{name} has demand to evaulate `#{code}`"
+    events = [node] # this will always emit just one event with the current code
     {:noreply, events, node}
   end
 
   def handle_info(:update_code, %CodeNode{name: name, code: code} = node) do
     # This callback is invoked by the Process.send_after/3 message below.
-
-    Process.send_after(self(), :update_code, Enum.random(1..5))
-    IO.puts "#{name} is now #{code + 1}"
-    {:noreply, [], %{node | code: code + 1}}
+    Process.send_after(self(), :update_code, Enum.random(1..500))
+    IO.puts "#{name} changed to `#{code + 1}`"
+    {:noreply, [], %{node | code: code + 1, has_demand: true}}
   end
 
 
-  def handle_info({:result, new_result}, %CodeNode{name: name} = node) do
+  def handle_info({:result, new_result, code_for_result}, %CodeNode{name: name, code: code} = node) do
     # This callback is invoked by the Process.send_after/3 message below.
-    IO.puts "result for #{name}: #{new_result} #{inspect self()}"
+    IO.puts "#{name} got result #{new_result} evaluating `#{code_for_result}`"
     {:noreply, [], %{node | result: new_result}}
   end
 end
@@ -62,7 +66,7 @@ defmodule CodeRunner do
     {:noreply, [], Map.delete(producers, from)}
   end
 
-  def handle_events([event], from, producers) do
+  def handle_events([%CodeNode{name: name, code: code}], from, producers) do
     # Bump the amount of pending events for the given producer
     producers = Map.update!(producers, from, fn {pending} ->
       {pending + 1}
@@ -72,17 +76,17 @@ defmodule CodeRunner do
     {pid, ref} = from
 
     # Consume the events by printing them.
-    IO.puts("handle event #{event} for #{inspect pid}")
-    result = 2 * event
-    Process.send_after(self(), {:process_result, pid, result, from}, Enum.random(1..500))
+    IO.puts("#{name} starting evaluation for `#{code}`")
+    result = 2 * code
+    Process.send_after(self(), {:process_result, pid, result, from, code}, Enum.random(1..500))
 
     # A producer_consumer would return the processed events here.
     {:noreply, [], producers}
   end
 
-  def handle_info({:process_result, pid, result, from}, producers) do
+  def handle_info({:process_result, pid, result, from, code}, producers) do
     # This callback is invoked by the Process.send_after/3 message below.
-    send(pid, {:result, result})
+    send(pid, {:result, result, code})
     {:noreply, [], ask_and_schedule(producers, from)}
   end
 
