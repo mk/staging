@@ -9,38 +9,31 @@ alias Experimental.{GenStage}
 defmodule CodeNode do
   use GenStage
 
+  defstruct name: nil, code: nil, result: nil
+
   def init({name, counter}) do
-    send(self(), :inc)
-    {:producer, {name, counter, nil}}
+    send(self(), :update_code)
+    {:producer, %CodeNode{name: name, code: counter}}
   end
 
-  def handle_demand(demand, {name, counter, value}) when demand > 0 do
-    # If the counter is 3 and we ask for 2 items, we will
-    # emit the items 3 and 4, and set the state to 5.
-    events = Enum.to_list(counter..counter+demand-1)
-    {:noreply, events, {name, counter + demand, value}}
+  def handle_demand(1 = demand, %CodeNode{name: name, code: code} = node) when demand > 0 do
+    events = [code] # this will always emit just one event with the current code
+    {:noreply, events, node}
   end
 
-  def handle_info(:inc, {name = "A", counter, value}) do
+  def handle_info(:update_code, %CodeNode{name: name, code: code} = node) do
     # This callback is invoked by the Process.send_after/3 message below.
 
-    Process.send_after(self(), :inc, Enum.random(1..5))
-    IO.puts "#{name} is now #{counter + 1}"
-    {:noreply, [], {name, counter + 1, value}}
-  end
-  def handle_info(:inc, {name, counter, value}) do
-    # This callback is invoked by the Process.send_after/3 message below.
-
-    Process.send_after(self(), :inc, Enum.random(1..5))
-    IO.puts "#{name} is now #{counter + 1}"
-    {:noreply, [], {name, counter + 1, value}}
+    Process.send_after(self(), :update_code, Enum.random(1..5))
+    IO.puts "#{name} is now #{code + 1}"
+    {:noreply, [], %{node | code: code + 1}}
   end
 
 
-  def handle_info({:result, new_result}, {name, counter, _}) do
+  def handle_info({:result, new_result}, %CodeNode{name: name} = node) do
     # This callback is invoked by the Process.send_after/3 message below.
     IO.puts "result for #{name}: #{new_result} #{inspect self()}"
-    {:noreply, [], {name, counter, new_result}}
+    {:noreply, [], %{node | result: new_result}}
   end
 end
 
