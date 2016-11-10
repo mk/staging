@@ -93,9 +93,16 @@ defmodule CodeRunner do
     send(pid, {:result, result, code})
     {:noreply, [], ask_and_schedule(%{state| is_executing: false})}
   end
+  def handle_info(:ask_if_idle, state = %{is_executing: false}) do
+    {:noreply, [], ask_and_schedule(state)}
+  end
+  def handle_info(_, state) do
+    {:noreply, [], state}
+  end
 
   defp ask_and_schedule(state = %CodeRunner{ producers: producers, is_executing: false}) do
     for producer <- producers, do: GenStage.ask(producer, 1)
+    Process.send_after(self(), :ask_if_idle, 100)
     state
   end
   defp ask_and_schedule(state) do
