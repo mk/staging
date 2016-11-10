@@ -49,35 +49,30 @@ end
 defmodule CodeRunner do
   use GenStage
 
+  defstruct producers: [], is_executing: false
+
   def init(_) do
-    {:consumer, %{}}
+    {:consumer, %CodeRunner{}}
   end
 
-  def handle_subscribe(:producer, opts, from, producers) do
+  def handle_subscribe(:producer, opts, from, state = %CodeRunner{ producers: producers }) do
     # We will only allow max_demand events every 5000 miliseconds
-    pending = opts[:max_demand] || 1
+    pending = 1
 
     # Register the producer in the state
-    producers = Map.put(producers, from, pending)
-    # Ask for the pending events and schedule the next time around
-    producers = ask_and_schedule(producers, from)
+    state = Map.put(state, :producers, [from | producers])
+    GenStage.ask(from, 1)
 
     # Returns manual as we want control over the demand
-    {:manual, producers}
+    {:manual, state}
   end
 
-  def handle_cancel(_, from, producers) do
-    # Remove the producers from the map on unsubscribe
-    {:noreply, [], Map.delete(producers, from)}
+  def handle_cancel(_, from, state) do
+    # Remove the state from the map on unsubscribe
+    {:noreply, [], Map.delete(state, from)}
   end
 
-  def handle_events([%CodeNode{name: name, code: code}], from, producers) do
-    # Bump the amount of pending events for the given producer
-    producers = Map.update!(producers, from, fn pending ->
-      pending + 1
-    end)
-
-
+  def handle_events([%CodeNode{name: name, code: code}], from, state = %{is_executing: false}) do
     {pid, ref} = from
 
     # Consume the events by printing them.
@@ -86,23 +81,25 @@ defmodule CodeRunner do
     Process.send_after(self(), {:process_result, pid, result, from, code}, Enum.random(1..500))
 
     # A producer_consumer would return the processed events here.
-    {:noreply, [], producers}
+    {:noreply, [], %{state| is_executing: true}}
+  end
+  def handle_events([%CodeNode{name: name, code: code}], from, state) do
+    IO.puts("busy in handle_events for #{name} (`#{code}`).")
+    {:noreply, [], %{state| is_executing: true}}
   end
 
-  def handle_info({:process_result, pid, result, from, code}, producers) do
+  def handle_info({:process_result, pid, result, from, code}, state) do
     # This callback is invoked by the Process.send_after/3 message below.
     send(pid, {:result, result, code})
-    {:noreply, [], ask_and_schedule(producers, from)}
+    {:noreply, [], ask_and_schedule(%{state| is_executing: false})}
   end
 
-  defp ask_and_schedule(producers, from) do
-    case producers do
-      %{^from => pending} ->
-        GenStage.ask(from, pending)
-        Map.put(producers, from, 0)
-      %{} ->
-        producers
-    end
+  defp ask_and_schedule(state = %CodeRunner{ producers: producers, is_executing: false}) do
+    for producer <- producers, do: GenStage.ask(producer, 1)
+    state
+  end
+  defp ask_and_schedule(state) do
+    state
   end
 end
 
